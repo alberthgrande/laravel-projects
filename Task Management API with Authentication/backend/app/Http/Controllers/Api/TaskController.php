@@ -4,99 +4,69 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Task;
+use App\Services\TaskService;
+use App\Http\Resources\TaskResource;
+use App\Http\Requests\StoreTaskRequest;
+use App\Http\Requests\UpdateTaskRequest;
 use Illuminate\Http\Request;
 use function Composer\Autoload\includeFile;
 
 class TaskController extends Controller
 {
+
+    protected $taskService;
+
+    public function __construct(TaskService $taskService)
+    {
+        $this->taskService = $taskService;
+    }
+
     public function index(Request $request)
     {
-        $query = auth()->user()->tasks();
 
-        // filter status
-        if($request->has('status')){
-            $query->where('status', $request->status);
-        }
+        $tasks = $this->taskService->getUserTasks(auth()->user(), $request);
 
-        // search by title
-        if($request->has('search')){
-            $query->where('title', 'like', '%' . $request->search . '%');
-        }
-
-        // sorting (safe column only)
-        $allowedSorts = ['title', 'created_at', 'updated_at'];
-        if($request->has('sort') && in_array($request->sort, $allowedSorts)){
-            $query->orderBy($request->sort);
-        }
-        else {
-            $query->latest();
-        }
-
-        // pagination
-        $paginatedTasks = $query->paginate();
-
-        return response()->json($paginatedTasks);
+        return TaskResource::collection($tasks);
     }
 
-    public function store(Request $request)
+    public function store(StoreTaskRequest $request)
     {
-        $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'due_date' => 'nullable|date',
-        ]);
+        $task = $this->taskService->createTask(auth()->user(), $request->validated());
 
-        $task = Task::create([
-            'user_id' => auth()->id(),
-            'title' => $request->title,
-            'description' => $request->description,
-            'due_date' => $request->due_date,
-        ]);
-
-        return response()->json($task);
+        return new TaskResource($task);
     }
 
-    public function show($id)
+    public function show(Task $task)
     {
-        $task = Task::findOrFail($id);
 
         if ($task->user_id !== auth()->id()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        return response()->json($task);
+        return new TaskResource($task);
     }
 
-    public function update(Request $request, $id)
+    public function update(UpdateTaskRequest $request, Task $task)
     {
-        $task = Task::findOrFail($id);
 
         if ($task->user_id !== auth()->id()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $request->validate([
-            'title' => 'sometimes|required|string|max:255',
-            'description' => 'nullable|string',
-            'due_date' => 'nullable|date',
-            'status' => 'nullable|string'
-        ]);
+        $task = $this->taskService->updateTask($task,$request->validated());
 
-        $task->update($request->all());
-
-        return response()->json($task);
+        return new TaskResource($task);
     }
 
 
-    public function destroy($id)
+    public function destroy(Task $task)
     {
-        $task = Task::findOrFail($id);
 
         if ($task->user_id !== auth()->id()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $task->delete();
+        $task = $this->taskService->deleteTask($task);
 
         return response()->json([
             'message'=>'Task deleted'
